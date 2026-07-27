@@ -1015,20 +1015,15 @@
                 Position = dim2(0, 20, 0, 20);
                 Size = dim2(0, 40, 0, 40);
                 BorderSizePixel = 0;
+                BackgroundTransparency = 1;
                 BackgroundColor3 = accent;
-            })
-            library:create("UICorner", { Parent = badge; CornerRadius = dim(0, 11) })
-            library:create("UIGradient", {
-                Parent = badge;
-                Rotation = 115;
-                Color = rgbseq{ rgbkey(0, white), rgbkey(1, rgb(170, 170, 170)) };
             })
             library:create("ImageLabel", {
                 Parent = badge;
                 Name = "\0";
                 AnchorPoint = vec2(0.5, 0.5);
                 Position = dim2(0.5, 0, 0.5, 0);
-                Size = dim2(0, 22, 0, 22);
+                Size = dim2(0, 40, 0, 40);
                 BackgroundTransparency = 1;
                 Image = sel_icon;
                 ImageColor3 = white;
@@ -5990,7 +5985,8 @@
                     BackgroundTransparency = 1;
                     AnchorPoint = vec2(0, 0);
                     AutomaticSize = Enum.AutomaticSize.Y;
-                    BackgroundColor3 = rgb(14, 14, 16)
+                    -- Matches the presence bar's fill.
+                    BackgroundColor3 = rgb(26, 26, 31)
                 });
 
                 library:create( "UICorner" , {
@@ -6014,7 +6010,7 @@
                     Name = "\0";
                     AnchorPoint = vec2(0.5, 0.5);
                     Position = dim2(0.5, 0, 0.5, 0);
-                    Size = dim2(0, 22, 0, 22);
+                    Size = dim2(0, 38, 0, 38);
                     BorderColor3 = rgb(0, 0, 0);
                     BorderSizePixel = 0;
                     BackgroundTransparency = 1;
