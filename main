@@ -6021,7 +6021,7 @@
 
                 items[ "title" ] = library:create( "TextLabel" , {
                     FontFace = fonts.font;
-                    TextColor3 = rgb(255, 255, 255);
+                    TextColor3 = themes.preset.accent;
                     BorderColor3 = rgb(0, 0, 0);
                     Text = cfg.name;
                     Parent = items[ "notification" ];
@@ -6034,7 +6034,7 @@
                     AutomaticSize = Enum.AutomaticSize.XY;
                     TextSize = 15;
                     BackgroundColor3 = rgb(255, 255, 255)
-                });
+                }); library:apply_theme(items[ "title" ], "accent", "TextColor3");
 
                 items[ "info" ] = library:create( "TextLabel" , {
                     FontFace = fonts.font;
