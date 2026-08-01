@@ -1928,6 +1928,9 @@
                     PaddingLeft = dim(0, 8); PaddingRight = dim(0, 8);
                 })
                 dock.InputBegan:Connect(begin_dock_drag)
+                -- Published so library:set_dock_enabled can reach the pill from
+                -- outside this closure (Safe Mode hides it).
+                library.dock_frame = dock
                 return dock
             end
 
@@ -2171,7 +2174,10 @@
                         items[ "main" ].BackgroundTransparency = 0
                         -- Stays off-screen while closed; OPEN moves it back.
 
-                        if dock then
+                        -- Safe Mode (library.dock_enabled == false) suppresses the
+                        -- pill entirely: the window still collapses, it just leaves
+                        -- nothing on screen behind it.
+                        if dock and library.dock_enabled ~= false then
                             dock.Visible = true
                             dock.Size = dim2(0, 20, 0, 40)
                             menu_tween(dock, { Size = dock_full_size() }, Enum.EasingStyle.Back, DOCK_T)
@@ -4757,6 +4763,13 @@
                 library:stop_keybind_loop()
             end
             library:refresh_keybind_panel()
+        end
+
+        function library:set_dock_enabled(bool)
+            library.dock_enabled = bool and true or false
+            if not library.dock_enabled and library.dock_frame then
+                library.dock_frame.Visible = false
+            end
         end
 
         function library:presence_bar(properties)
