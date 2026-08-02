@@ -189,6 +189,8 @@
     end
 
     local keys = {
+        [Enum.KeyCode.F13] = "M4",
+        [Enum.KeyCode.F14] = "M5",
         [Enum.KeyCode.LeftShift] = "LS",
         [Enum.KeyCode.RightShift] = "RS",
         [Enum.KeyCode.LeftControl] = "LC",
@@ -4980,7 +4982,7 @@
 
             local mode = e.get_mode and e.get_mode() or nil
             local state = active and ((mode == "Toggle") and "Toggled" or "Held") or "Off"
-            local key_name = is_keycode and key.Name or "None"
+            local key_name = is_keycode and (keys[key] or key.Name) or "None"
 
             if key_name ~= e._lkn or state ~= e._lst then
                 e._lkn = key_name
