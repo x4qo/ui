@@ -2769,7 +2769,10 @@
                     ScrollBarImageColor3 = rgb(44, 44, 46);
                     Active = true;
                     AutomaticCanvasSize = Enum.AutomaticSize.Y;
-                    ScrollBarThickness = 2;
+                    -- Scrollbar hidden. It rendered as a thin grey line down the edge
+                    -- of every section whether or not the content overflowed; wheel
+                    -- and touch scrolling still work with a zero-width bar.
+                    ScrollBarThickness = 0;
                     Parent = items[ "inline" ];
                     Name = "\0";
                     Size = dim2(1, 0, 1, -40);
@@ -3511,7 +3514,10 @@
                 scrolling = options.scrolling or false;
                 max_height = options.max_height or 240;
 
-                width = options.width or 95;
+                -- Wider default box: at 95 most option names ("CaptainMarvel",
+                -- "AgathaHarkness") truncated in both the closed box and the list,
+                -- since the list is sized to the box.
+                width = options.width or 130;
 
                 open = false;
                 option_instances = {};
@@ -3519,13 +3525,16 @@
                 ignore = options.ignore or false;
                 items = {};
                 y_size;
-                seperator = options.seperator or options.Seperator or true;
+                -- Defaults off. The rule under every dropdown row read as a stray
+                -- underline on the box rather than a section divider; callers that
+                -- want one can still pass seperator = true.
+                seperator = options.seperator or options.Seperator or false;
             }
 
             cfg.default = options.default or (cfg.multi and {cfg.items[1]}) or cfg.items[1] or "None"
             flags[cfg.flag] = cfg.default
 
-            local SEARCH_BOX_HEIGHT = cfg.scrolling and 30 or 0
+            local SEARCH_BOX_HEIGHT = 30
 
             local items = cfg.items; do
 
@@ -3686,8 +3695,8 @@
                         Parent = items[ "indicator" ];
                         Name = "\0";
                         AnchorPoint = vec2(0.5, 0);
-                        Position = dim2(0.5, 0, 0, -1);
-                        Size = dim2(0, 12, 0, 11);
+                        Position = dim2(0.5, 0, 0, 0);
+                        Size = dim2(0, 12, 0, 7);
                         BackgroundTransparency = 1;
                         BorderSizePixel = 0;
                         Rotation = 180;
@@ -3700,13 +3709,27 @@
                         Parent = items[ "indicator" ];
                         Name = "\0";
                         AnchorPoint = vec2(0.5, 1);
-                        Position = dim2(0.5, 0, 1, 1);
-                        Size = dim2(0, 12, 0, 11);
+                        Position = dim2(0.5, 0, 1, 0);
+                        Size = dim2(0, 12, 0, 7);
                         BackgroundTransparency = 1;
                         BorderSizePixel = 0;
                         ScaleType = Enum.ScaleType.Fit;
                         Image = "rbxassetid://101025591575185";
                         ImageColor3 = rgb(86, 86, 87);
+                    });
+
+                    -- The divider bar between the two arrows. Drawn rather than
+                    -- sourced as an asset: it is a 1px rule, and this way the whole
+                    -- glyph recolours with the arrows instead of needing a matching
+                    -- upload.
+                    items[ "indicator_bar" ] = library:create( "Frame" , {
+                        Parent = items[ "indicator" ];
+                        Name = "\0";
+                        AnchorPoint = vec2(0.5, 0.5);
+                        Position = dim2(0.5, 0, 0.5, 0);
+                        Size = dim2(0, 9, 0, 1);
+                        BorderSizePixel = 0;
+                        BackgroundColor3 = rgb(86, 86, 87);
                     });
 
                     items[ "dropdown_holder" ] = library:create( "Frame" , {
@@ -3739,7 +3762,10 @@
                         Parent = items[ "outline" ]
                     });
 
-                    if cfg.scrolling then
+                    -- Search is built for every dropdown now, not just scrolling ones:
+                    -- it appears with the list on open and is the fastest way through
+                    -- a long option set.
+                    do
                         items[ "search_box" ] = library:create( "TextBox" , {
                             FontFace = fonts.small;
                             Parent = items[ "outline" ];
@@ -3775,7 +3801,7 @@
                         Size = dim2(1, 0, 1, -SEARCH_BOX_HEIGHT);
                         CanvasSize = dim2(0, 0, 0, 0);
                         AutomaticCanvasSize = Enum.AutomaticSize.Y;
-                        ScrollBarThickness = cfg.scrolling and 4 or 0;
+                        ScrollBarThickness = 0;
                         ScrollBarImageColor3 = rgb(90, 90, 92);
                         ScrollingEnabled = cfg.scrolling;
                         ClipsDescendants = true;
@@ -3938,6 +3964,10 @@
                     -- list does not pop into existence at full opacity on frame one.
                     items[ "outline" ].BackgroundTransparency = 1
                     library:tween(items[ "outline" ], { BackgroundTransparency = 0 }, Enum.EasingStyle.Quad, 0.12)
+                elseif items[ "search_box" ] then
+                    -- Reset the filter on close so the next open shows every option.
+                    items[ "search_box" ]:ReleaseFocus()
+                    items[ "search_box" ].Text = ""
                 end
 
                 if not (self.sanity and library.current_open == self) then
