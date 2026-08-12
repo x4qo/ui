@@ -3700,7 +3700,9 @@
                         BorderColor3 = rgb(0, 0, 0);
                         Parent = library[ "items" ];
                         Name = "\0";
-                        Visible = true;
+                        -- Hidden until first opened; a zero-height holder still draws
+                        -- its border stroke as a stray line otherwise.
+                        Visible = false;
                         BackgroundTransparency = 1;
                         Size = dim2(0, 0, 0, 0);
                         BorderSizePixel = 0;
@@ -3907,6 +3909,23 @@
                 end
 
                 if cfg._follow then cfg._follow:Disconnect(); cfg._follow = nil end
+
+                -- A closed dropdown collapses the holder to zero height, but the
+                -- panel's border stroke still draws on that zero-height frame -- which
+                -- is the thin line left sitting under the box after closing. Hiding
+                -- the holder outright is the only thing that removes it, so it is
+                -- shown on open and hidden once the collapse finishes.
+                cfg._vis_token = (cfg._vis_token or 0) + 1
+                local vis_token = cfg._vis_token
+                if bool then
+                    items[ "dropdown_holder" ].Visible = true
+                else
+                    task.delay(0.18, function()
+                        if vis_token ~= cfg._vis_token then return end
+                        if cfg.open then return end
+                        items[ "dropdown_holder" ].Visible = false
+                    end)
+                end
 
                 local popWidth = reposition()
                 -- Quint out on the way open and a slightly quicker one closing: the
