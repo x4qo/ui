@@ -9,6 +9,7 @@
     local run = game:GetService("RunService")
     local stats = game:GetService("Stats")
     local gui_parent = gethui()
+    local function safe_cb(fn) if type(fn) ~= "function" then return fn end return function(...) pcall(fn, ...) end end
     local debris = game:GetService("Debris")
     local tween_service = game:GetService("TweenService")
     local sound_service = game:GetService("SoundService")
@@ -102,10 +103,6 @@
 
         menu_visible = true,
 
-        -- Tabs listed here (by name, case-insensitive) are NOT shown as icons on the
-        -- minimise dock. The tab still exists in the sidebar as normal — this only
-        -- hides its quick-launch icon from the collapsed pill. Edit this table to
-        -- taste, e.g. dock_excluded_tabs = { ["Settings"] = true, ["Config"] = true }.
         dock_excluded_tabs = {
             ["Visuals"] = true,
             ["Private"] = true,
@@ -114,19 +111,12 @@
         },
     }
 
-    -- Decorative gradient / shine animations have been removed entirely. These two
-    -- shims keep the old call sites working but guarantee NO per-frame gradient
-    -- animation ever runs: any registered driver is immediately settled to its
-    -- static look via stop() and never connected, and toggling "animations" is a
-    -- no-op. This eliminates the animated-gradient render loops that dragged FPS
-    -- while toggling features.
     function library:register_anim_driver(driver)
         if driver and driver.stop then pcall(driver.stop) end
         return driver
     end
 
     function library:set_animations_enabled()
-        -- intentionally inert: gradient animations no longer exist
     end
 
     local themes = {
@@ -134,11 +124,6 @@
             accent = rgb(255, 255, 255),
         },
 
-        -- Weak values, same reason as font_users: apply_theme registers every themed
-        -- instance for later recolouring, including short-lived runtime ones
-        -- (dropdown option rows are rebuilt on every refresh, notifications churn
-        -- constantly). Strong refs would pin destroyed instances forever and make
-        -- update_theme walk a list that only ever grows.
         utility = {
             accent = {
                 BackgroundColor3 = setmetatable({}, { __mode = "v" }),
@@ -151,9 +136,6 @@
     themes.next_id = 0
 
     local function accent_sequence(c)
-        -- Title gradients removed: return a flat single-colour sequence so every
-        -- title / icon "gradient" renders as one solid accent colour with no
-        -- visible left-to-right ramp.
         return rgbseq{
             rgbkey(0, c),
             rgbkey(1, c)
@@ -326,11 +308,6 @@
         }
     end
 
-    -- Weak values: every text instance ever created is registered here so set_font
-    -- can restyle them, but runtime churn (notifications, dropdown option rows,
-    -- keybind rows, tooltips) creates and destroys thousands of these. A strong
-    -- table would pin every destroyed instance in memory forever and make set_font
-    -- walk an ever-growing list -- a steady FPS/memory decay over a long session.
     local font_users = {
         main = setmetatable({}, { __mode = "v" }),
         small = setmetatable({}, { __mode = "v" }),
@@ -355,25 +332,14 @@
             end
             local info = by_style[style]
             if not info then
-                -- EasingDirection.Out gives the snappy-start / soft-settle feel used
-                -- throughout velhubui, which reads as noticeably smoother for UI than
-                -- the old symmetric InOut. Applied globally so every tween benefits.
                 info = TweenInfo.new(t, style, Enum.EasingDirection.Out, 0, false, 0)
                 by_style[style] = info
             end
             return info
         end
 
-        -- Per-instance registry of in-flight tweens, keyed by property name. Weak keys
-        -- so destroyed instances drop out on their own.
         local active_tweens = setmetatable({}, { __mode = "k" })
 
-        -- Cancel any tween already animating a property before starting a new one on
-        -- it. Roblox does NOT do this: firing a second tween at the same property
-        -- leaves both running and fighting, so rapid interaction (spamming a toggle,
-        -- a keybind, the menu bind, stacking notifications) piled up overlapping
-        -- tweens that got progressively jankier and cost real frame time. One tween
-        -- per property at a time, always.
         function library:tween(obj, properties, easing_style, time)
             if not obj then return end
 
@@ -400,8 +366,6 @@
             return tween
         end
 
-        -- No per-frame FPS/ping driver. Consumers are still registered so callers do
-        -- not have to change, but nothing drives them and nothing is connected.
         function library:on_fps(callback)
             if not self.fps_consumers then self.fps_consumers = {} end
             insert(self.fps_consumers, callback)
@@ -427,9 +391,6 @@
             local dirty = false
             local ghost
 
-            -- InputChanged fires several times per rendered frame; record the most
-            -- recent target and flush a single Size write per frame so we only
-            -- re-slice the window (and its shadow) once a frame instead of many.
             local function on_resize(input)
                 if input.UserInputType == Enum.UserInputType.MouseMovement then
                     local viewport_x = camera.ViewportSize.X
@@ -482,7 +443,7 @@
                 end
             end
 
-            Frame.InputBegan:Connect(function(input)
+            Frame.InputBegan:Connect(safe_cb(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     start = input.Position
                     start_size = frame.Size
@@ -496,13 +457,11 @@
                         ghost.Visible = true
                         frame.Visible = false
                     end
-                    -- The slice-image shadow re-slices every frame the window size
-                    -- changes; hide it while resizing to keep FPS up.
                     if shadow then shadow.Visible = false end
-                    resize_conn = uis.InputChanged:Connect(on_resize)
-                    render_conn = run.RenderStepped:Connect(apply)
+                    resize_conn = uis.InputChanged:Connect(safe_cb(on_resize))
+                    render_conn = run.RenderStepped:Connect(safe_cb(apply))
                 end
-            end)
+            end))
 
             library:connection(uis.InputEnded, function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -535,11 +494,6 @@
             return (y_cond and x_cond)
         end
 
-        -- A cheap stand-in used while dragging/resizing a heavy frame. Moving a
-        -- frame re-propagates the transform to every descendant every frame; the
-        -- window has hundreds, so that is what costs the frame time no matter how
-        -- few property writes we do. The ghost is 3 instances with nothing inside
-        -- it, so moving it is free regardless of how big the real window is.
         function library:ghost_for(frame)
             local ghost = library:create( "Frame" , {
                 Parent = frame.Parent;
@@ -569,11 +523,6 @@
             local dirty = false
             local ghost
 
-            -- InputChanged can fire several times per rendered frame; only the
-            -- most recent target matters, so we just record it here and flush a
-            -- single Position write per frame in RenderStepped. This avoids
-            -- invalidating the whole window's layout multiple times a frame,
-            -- which is what tanks FPS while dragging.
             local function on_move(input)
                 if input.UserInputType == Enum.UserInputType.MouseMovement then
                     local viewport_x = camera.ViewportSize.X
@@ -599,8 +548,6 @@
 
             local function apply()
                 if dirty and target_position then
-                    -- Drive the ghost while dragging; the real window is hidden and
-                    -- untouched, so nothing re-lays out until the drag ends.
                     if ghost and ghost.Visible then
                         ghost.Position = target_position
                     else
@@ -617,13 +564,10 @@
                 if render_conn then render_conn:Disconnect(); render_conn = nil end
                 dirty = false
                 if ghost and ghost.Visible then
-                    -- Land the real window where the ghost ended up. This is the
-                    -- only layout pass the whole drag costs.
                     frame.Position = ghost.Position
                     ghost.Visible = false
                     frame.Visible = true
                 end
-                -- Restore the drop shadow once the drag ends.
                 if shadow then shadow.Visible = true end
                 if active then
                     active = false
@@ -631,7 +575,7 @@
                 end
             end
 
-            frame.InputBegan:Connect(function(input)
+            frame.InputBegan:Connect(safe_cb(function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     start = input.Position
                     start_size = frame.Position
@@ -646,14 +590,11 @@
                         ghost.Visible = true
                         frame.Visible = false
                     end
-                    -- A large soft slice-image shadow re-composites over the whole
-                    -- screen every frame the window moves, which is what tanks FPS
-                    -- while dragging. Hide it for the duration of the drag.
                     if shadow then shadow.Visible = false end
-                    move_conn = uis.InputChanged:Connect(on_move)
-                    render_conn = run.RenderStepped:Connect(apply)
+                    move_conn = uis.InputChanged:Connect(safe_cb(on_move))
+                    render_conn = run.RenderStepped:Connect(safe_cb(apply))
                 end
-            end)
+            end))
 
             library:connection(uis.InputEnded, function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -754,8 +695,6 @@
         end
 
         function library:apply_theme(instance, theme, property)
-            -- Monotonic key: the registry is weak-valued, so `#t + 1` would land on
-            -- an index that is still live and silently drop that instance's theming.
             themes.next_id = themes.next_id + 1
             themes.utility[theme][property][themes.next_id] = instance
         end
@@ -794,7 +733,7 @@
         end
 
         function library:connection(signal, callback)
-            local connection = signal:Connect(callback)
+            local connection = signal:Connect(safe_cb(callback))
 
             insert(library.connections, connection)
 
@@ -837,12 +776,6 @@
             end
             local ins = Instance.new(instance)
 
-            -- Set every property BEFORE parenting. Writing properties on an
-            -- already-parented instance forces the engine to re-run layout,
-            -- redraw and replicate on each individual assignment; doing all the
-            -- writes while the instance is still orphaned collapses that into a
-            -- single insertion cost. This is the single biggest smoothness win
-            -- when the UI is being built, since every widget funnels through here.
             local parent = options.Parent
             for prop, value in options do
                 if prop ~= "Parent" then
@@ -853,9 +786,6 @@
                 ins.Parent = parent
             end
 
-            -- Monotonic key, not table.insert: font_users is weak-valued, so entries
-            -- disappear as instances are collected and `#t + 1` would resolve to an
-            -- index that is still live and overwrite it.
             if options.FontFace == fonts.font then
                 font_users.next_id = font_users.next_id + 1
                 font_users.main[font_users.next_id] = ins
@@ -1080,13 +1010,13 @@
             local shine_t = 0
             local function start_shine()
                 if shine_conn or not alive then return end
-                shine_conn = run.RenderStepped:Connect(function(dt)
+                shine_conn = run.RenderStepped:Connect(safe_cb(function(dt)
                     if not alive then return end
                     shine_t = (shine_t + dt * 0.35) % 1
                     if brand_grad and brand_grad.Parent then
                         brand_grad.Offset = vec2(shine_t * 2 - 1, 0)
                     end
-                end)
+                end))
             end
             local function stop_shine()
                 if shine_conn then shine_conn:Disconnect(); shine_conn = nil end
@@ -1196,32 +1126,32 @@
                 })
                 library:create("UICorner", { Parent = underline; CornerRadius = dim(0, 2) })
 
-                card.MouseEnter:Connect(function()
+                card.MouseEnter:Connect(safe_cb(function()
                     if chosen then return end
                     fastTween(card, { BackgroundColor3 = hover_bg }, 0.12)
                     fastTween(cstroke, { Color = accent, Transparency = 0.1 }, 0.12)
                     fastTween(cscale, { Scale = 1.03 }, 0.12)
                     fastTween(underline, { Size = dim2(1, -28, 0, 2) }, 0.12)
-                end)
-                card.MouseLeave:Connect(function()
+                end))
+                card.MouseLeave:Connect(safe_cb(function()
                     if chosen then return end
                     fastTween(card, { BackgroundColor3 = base_bg }, 0.12)
                     fastTween(cstroke, { Color = base_stroke, Transparency = base_stroke_t }, 0.12)
                     fastTween(cscale, { Scale = 1 }, 0.12)
                     fastTween(underline, { Size = dim2(0, opt.accent and 40 or 0, 0, 2) }, 0.12)
-                end)
-                card.MouseButton1Click:Connect(function()
+                end))
+                card.MouseButton1Click:Connect(safe_cb(function()
                     if chosen then return end
                     chosen = opt.key
 
                     fastTween(cstroke, { Color = accent, Transparency = 0 }, 0.1)
                     fastTween(underline, { Size = dim2(1, -28, 0, 2) }, 0.12)
                     fastTween(cscale, { Scale = 1.05 }, 0.12, Enum.EasingStyle.Back)
-                    task.delay(0.12, function()
+                    task.delay(0.12, safe_cb(function()
                         if cscale and cscale.Parent then
                             fastTween(cscale, { Scale = 1 }, 0.1)
                         end
-                    end)
+                    end))
 
                     for _, ref in ipairs(cardRefs) do
                         if ref.card ~= card then
@@ -1229,7 +1159,7 @@
                             fastTween(ref.card, { BackgroundTransparency = 1 }, 0.16)
                         end
                     end
-                end)
+                end))
             end
 
             for i, opt in ipairs(options) do
@@ -1284,13 +1214,6 @@
                 Parent = gui_parent;
                 Name = random_gui_name();
                 Enabled = true;
-                -- Sibling, not Global. Global makes the engine resolve draw order
-                -- across EVERY descendant of this ScreenGui as one flat list, so any
-                -- ZIndex/visibility change re-sorts the whole ~2000-instance tree --
-                -- which is what made dragging and toggling expensive. Everything that
-                -- needs to float (window, dock, dropdown holders, colour pickers) is
-                -- a direct child of this ScreenGui, so sibling ordering still layers
-                -- them correctly by their own ZIndex.
                 ZIndexBehavior = Enum.ZIndexBehavior.Sibling;
                 IgnoreGuiInset = true;
             });
@@ -1407,8 +1330,6 @@
                     BackgroundColor3 = rgb(21, 21, 23)
                 });
 
-                -- Badge is a bare layout anchor now: no accent fill, no corner, no
-                -- gradient. The icon art carries its own colour and fills the slot.
                 items[ "title_badge" ] = library:create( "Frame" , {
                     Parent = items[ "title" ];
                     Name = "\0";
@@ -1501,15 +1422,10 @@
                     })
                 end
 
-                -- Title shine animation removed: titles render as a static gradient,
-                -- so there is no driver to start. Kept as a no-op because the build
-                -- path calls it for every registered title.
                 local function start_title_driver()
                 end
 
                 local function stop_title_driver()
-                    -- Settle every gradient to a static (non-shifting) look so titles
-                    -- still render nicely with zero per-frame work.
                     if title_shine_seq then
                         for idx = 1, #title_gradients do
                             local g = title_gradients[idx]
@@ -1574,9 +1490,6 @@
                     BackgroundColor3 = rgb(21, 21, 23)
                 });
 
-                -- Top-right control. Same glyph as before, but it is now clickable and
-                -- minimises the window (it used to be purely decorative; the window is
-                -- draggable from anywhere on the title bar anyway).
                 items[ "move_icon" ] = library:create( "ImageButton" , {
                     Parent = items[ "multi_holder" ];
                     Name = "\0";
@@ -1591,22 +1504,17 @@
                 }); library:apply_theme(items[ "move_icon" ], "accent", "ImageColor3");
                 items[ "minimise_button" ] = items[ "move_icon" ];
 
-                -- Routed through library:tween so flicking the cursor on and off the
-                -- icon replaces the running Size tween instead of stacking one per
-                -- hover event.
-                items[ "move_icon" ].MouseEnter:Connect(function()
+                items[ "move_icon" ].MouseEnter:Connect(safe_cb(function()
                     library:tween(items[ "move_icon" ], { Size = dim2(0, 28, 0, 28) }, Enum.EasingStyle.Back, 0.2)
-                end)
-                items[ "move_icon" ].MouseLeave:Connect(function()
+                end))
+                items[ "move_icon" ].MouseLeave:Connect(safe_cb(function()
                     library:tween(items[ "move_icon" ], { Size = dim2(0, 24, 0, 24) }, Enum.EasingStyle.Quad, 0.2)
-                end)
-                -- cfg.toggle_menu is defined further down in library:window, so it is
-                -- resolved at click time rather than captured here.
-                items[ "move_icon" ].MouseButton1Click:Connect(function()
+                end))
+                items[ "move_icon" ].MouseButton1Click:Connect(safe_cb(function()
                     if type(cfg.toggle_menu) == "function" then
                         cfg.toggle_menu(false)
                     end
-                end)
+                end))
 
                 if search_enabled then
 
@@ -1662,9 +1570,9 @@
                     ImageColor3 = rgb(170, 170, 172)
                 });
 
-                items[ "search_box" ]:GetPropertyChangedSignal("Text"):Connect(function()
+                items[ "search_box" ]:GetPropertyChangedSignal("Text"):Connect(safe_cb(function()
                     library:apply_search(items[ "search_box" ].Text)
-                end)
+                end))
 
                 do
                     local typing = false
@@ -1688,35 +1596,32 @@
                         end
                     end
 
-                    items[ "search" ].MouseEnter:Connect(function()
+                    items[ "search" ].MouseEnter:Connect(safe_cb(function()
                         set_search(true)
-                    end)
-                    items[ "search" ].MouseLeave:Connect(function()
+                    end))
+                    items[ "search" ].MouseLeave:Connect(safe_cb(function()
                         if not typing and items[ "search_box" ].Text == "" then
                             set_search(false)
                         end
-                    end)
+                    end))
 
-                    items[ "search_icon" ].MouseButton1Click:Connect(function()
+                    items[ "search_icon" ].MouseButton1Click:Connect(safe_cb(function()
                         set_search(true)
                         items[ "search_box" ]:CaptureFocus()
-                    end)
+                    end))
 
-                    items[ "search_box" ].Focused:Connect(function()
+                    items[ "search_box" ].Focused:Connect(safe_cb(function()
                         typing = true
-                    end)
-                    items[ "search_box" ].FocusLost:Connect(function()
+                    end))
+                    items[ "search_box" ].FocusLost:Connect(safe_cb(function()
                         typing = false
                         if items[ "search_box" ].Text == "" then
                             set_search(false)
                         end
-                    end)
+                    end))
                 end
                 end
 
-                -- Drop shadow removed: the large slice-image behind the window
-                -- re-composited/re-sliced every frame it moved or resized, which was
-                -- the main per-frame cost while dragging and animating.
 
                 items[ "global_fade" ] = library:create( "Frame" , {
                     Parent = items[ "main" ];
@@ -1803,12 +1708,6 @@
                 }); library:apply_theme(items[ "other_info" ], "accent", "TextColor3");
 
                 do
-                    -- The window info bar's fps/ping is driven externally by the host
-                    -- script's single always-on metrics loop via update_info_metrics,
-                    -- instead of starting a second per-frame RenderStepped (on_fps)
-                    -- here. One loop now feeds both this label and the host's presence
-                    -- bar, removing a redundant always-on render loop. The setter keeps
-                    -- the same change-detection + menu-hidden early-out the old loop had.
                     local guiRoot   = library[ "items" ]
                     local infoLabel = items[ "other_info" ]
                     local lastFps, lastPing = -1, -1
@@ -1832,18 +1731,9 @@
                 library:resizify(items[ "main" ], items[ "shadow" ], nil, nil, true)
             end
 
-            -- ── Minimise dock (velhubui-style tab-icon pill) ────────────────────
-            -- Closing the menu scales/fades the window away and grows a vertical pill
-            -- of the tab icons on the right edge; clicking an icon restores the window
-            -- and opens that tab.
             cfg.menu_open = true
             local dock
 
-            -- Dock dragging. The pill is anchored (1, 0.5) with a scale-based
-            -- position; normalising to pure offsets once (in that same anchor
-            -- space) keeps the grow/shrink animation looking identical while
-            -- making drag maths trivial. A movement threshold distinguishes a
-            -- drag from a tap, so the icons still work as tab shortcuts.
             local dock_pos_normalised = false
             local dock_suppress_click = false
 
@@ -1876,7 +1766,7 @@
                     if render_conn then render_conn:Disconnect(); render_conn = nil end
                 end
 
-                move_conn = uis.InputChanged:Connect(function(i)
+                move_conn = uis.InputChanged:Connect(safe_cb(function(i)
                     if i.UserInputType ~= Enum.UserInputType.MouseMovement
                         and i.UserInputType ~= Enum.UserInputType.Touch then
                         return
@@ -1891,25 +1781,23 @@
                         clamp(start_pos.Y.Offset + dy, sy * 0.5, camera.ViewportSize.Y - sy * 0.5)
                     )
                     dirty = true
-                end)
+                end))
 
-                render_conn = run.RenderStepped:Connect(function()
+                render_conn = run.RenderStepped:Connect(safe_cb(function()
                     if dirty and target then
                         dock.Position = target
                         dirty = false
                     end
-                end)
+                end))
 
-                end_conn = uis.InputEnded:Connect(function(i)
+                end_conn = uis.InputEnded:Connect(safe_cb(function(i)
                     if i.UserInputType ~= Enum.UserInputType.MouseButton1
                         and i.UserInputType ~= Enum.UserInputType.Touch then
                         return
                     end
                     finish()
-                    -- Swallow the click that ends a real drag; cleared by the next
-                    -- press rather than on a timer, so there is no ordering race.
                     dock_suppress_click = moved
-                end)
+                end))
             end
 
             local function build_dock()
@@ -1941,9 +1829,7 @@
                     PaddingTop = dim(0, 9); PaddingBottom = dim(0, 9);
                     PaddingLeft = dim(0, 8); PaddingRight = dim(0, 8);
                 })
-                dock.InputBegan:Connect(begin_dock_drag)
-                -- Published so library:set_dock_enabled can reach the pill from
-                -- outside this closure (Safe Mode hides it).
+                dock.InputBegan:Connect(safe_cb(begin_dock_drag))
                 library.dock_frame = dock
                 return dock
             end
@@ -1967,7 +1853,6 @@
                 for _, child in ipairs(dock:GetChildren()) do
                     if child:IsA("TextButton") then child:Destroy() end
                 end
-                -- Build a case-insensitive lookup of the excluded-tab names once.
                 local excluded = {}
                 for key, val in pairs(library.dock_excluded_tabs or {}) do
                     if val and type(key) == "string" then
@@ -1977,11 +1862,8 @@
 
                 local order = 0
                 for _, tab in ipairs(cfg._tabs or {}) do
-                    -- Mirror the sidebar exactly: skip tabs whose button was removed
-                    -- (e.g. the hidden safesink tab) or whose name is null-prefixed.
                     local btnValid = tab.button and tab.button.Parent ~= nil
                     local hidden = type(tab.name) == "string" and tab.name:sub(1, 1) == "\0"
-                    -- Also skip any tab explicitly excluded from the dock.
                     local isExcluded = type(tab.name) == "string" and excluded[tab.name:lower()] == true
                     if btnValid and not hidden and not isExcluded then
                         order = order + 1
@@ -2010,31 +1892,24 @@
                             ZIndex = 52;
                         })
                         local dscale = library:create( "UIScale" , { Parent = dbtn; Scale = 1 })
-                        dbtn.MouseEnter:Connect(function()
+                        dbtn.MouseEnter:Connect(safe_cb(function()
                             library:tween(dbtn, { BackgroundColor3 = rgb(38, 38, 46) }, Enum.EasingStyle.Quad, 0.16)
                             library:tween(dscale, { Scale = 1.12 }, Enum.EasingStyle.Back, 0.2)
-                        end)
-                        dbtn.MouseLeave:Connect(function()
+                        end))
+                        dbtn.MouseLeave:Connect(safe_cb(function()
                             library:tween(dbtn, { BackgroundColor3 = rgb(27, 27, 32) }, Enum.EasingStyle.Quad, 0.16)
                             library:tween(dscale, { Scale = 1 }, Enum.EasingStyle.Back, 0.2)
-                        end)
-                        -- Icons are drag handles too, so the pill can be grabbed
-                        -- anywhere; the threshold keeps a tap working as a shortcut.
-                        dbtn.InputBegan:Connect(begin_dock_drag)
-                        dbtn.MouseButton1Click:Connect(function()
+                        end))
+                        dbtn.InputBegan:Connect(safe_cb(begin_dock_drag))
+                        dbtn.MouseButton1Click:Connect(safe_cb(function()
                             if dock_suppress_click then return end
                             cfg.toggle_menu(true)
                             if tab.select then pcall(tab.select) end
-                        end)
+                        end))
                     end
                 end
             end
 
-            -- Every menu animation is tracked so the next toggle can cancel it. Without
-            -- this, spamming the bind stacks a fresh set of tweens on the same
-            -- properties each press: they all keep playing, fight each other, and the
-            -- orphaned task.delay bodies from earlier presses still fire. That is what
-            -- made the animation degrade and drag FPS down the longer you spammed it.
             cfg._menu_tweens = cfg._menu_tweens or {}
             cfg._menu_token = cfg._menu_token or 0
 
@@ -2046,9 +1921,6 @@
                 end
             end
 
-            -- library:tween already cancels a competing tween on the same property;
-            -- this additionally records the handle so a toggle can cancel animations
-            -- the next toggle would not otherwise touch (a half-played dock resize).
             local function menu_tween(obj, props, style, time)
                 local tween = library:tween(obj, props, style, time)
                 if tween then
@@ -2065,68 +1937,35 @@
                 library[ "items" ].Enabled = true
                 local mainScale = items[ "main_scale" ]
 
-                -- Kill whatever the previous press was still animating, and bump the
-                -- token so its pending task.delay bodies become no-ops.
                 cancel_menu_tweens()
                 cfg._menu_token = cfg._menu_token + 1
                 local token = cfg._menu_token
 
-                -- Where the window shrinks into / grows out of. Because UIScale
-                -- pivots at the window's top-left, parking the top-left just left of
-                -- the dock makes the collapsed window land right on top of the pill,
-                -- so it reads as the window folding straight into the dock.
                 local parked = dim2(1, -68, 0.5, -18)
-                -- Once the dock has been moved, collapse toward wherever it now is
-                -- instead of the fixed right-edge spot, so the hand-off still reads
-                -- as the window folding into the pill.
                 if dock and dock_pos_normalised then
                     parked = dim_offset(dock.Position.X.Offset - 54, dock.Position.Y.Offset - 18)
                 end
 
-                -- Timings tuned so the two halves hand off cleanly instead of
-                -- animating over each other: window collapses, THEN the pill pops.
-                local WIN_T  = 0.24   -- window shrink / grow
-                local HANDOFF = 0.12  -- pill starts this far into the window anim
-                local DOCK_T = 0.30   -- pill grow / shrink
+                local WIN_T  = 0.24
+                local HANDOFF = 0.12
+                local DOCK_T = 0.30
 
-                -- The window itself is NEVER animated. Tweening its Position (and
-                -- especially a UIScale on it) forces the engine to re-layout and
-                -- re-render every one of its ~2000 descendants on every frame of the
-                -- animation, which is what made minimise/open look choppy no matter
-                -- how good the framerate was. Instead we animate the same lightweight
-                -- ghost the drag code uses -- one Frame + corner + stroke -- and just
-                -- flip the real window's Visible at the ends. Cost is constant
-                -- regardless of how many elements the menu has.
                 local ghost = cfg._menu_ghost
                 if not ghost or not ghost.Parent then
                     ghost = library:ghost_for(items[ "main" ])
                     cfg._menu_ghost = ghost
                 end
 
-                -- Solid, and the same colour as the window itself. ghost_for defaults
-                -- to a translucent placeholder because that reads well over a window
-                -- you are dragging, but here the window is hidden, so a see-through
-                -- box just looks like a floating outline. Opaque makes the morph read
-                -- as the window shrinking rather than a ghost of it.
                 ghost.BackgroundColor3 = items[ "main" ].BackgroundColor3
                 ghost.BackgroundTransparency = 0
 
                 local pill_size = dim2(0, 40, 0, 40)
-                -- Parked far off-screen instead of Visible = false. Flipping Visible
-                -- on a tree this size makes the engine re-draw the whole thing on the
-                -- frame it comes back, which is a guaranteed hitch exactly when the
-                -- open animation starts. Off-screen it stays drawn and costs nothing
-                -- to bring back -- it is a Position write, no layout, no first paint.
                 local OFFSCREEN = dim2(0, -6000, 0, -6000)
 
                 if mainScale and mainScale.Scale ~= 1 then mainScale.Scale = 1 end
                 if not items[ "main" ].Visible then items[ "main" ].Visible = true end
 
                 if bool then
-                    -- OPEN: grow the ghost out of the pill so the window visibly comes
-                    -- FROM the dock, then hand off to the real window the moment it
-                    -- reaches full size. The real window is already drawn (parked
-                    -- off-screen), so the hand-off is a single Position write.
                     local restore = cfg._restore_pos or items[ "main" ].Position
                     local full_size = cfg._menu_full_size or items[ "main" ].Size
 
@@ -2138,12 +1977,9 @@
                     ghost.Size = pill_size
                     ghost.Visible = true
 
-                    -- Quart, and a touch quicker than the collapse: the ghost is a
-                    -- plain box, so the less time it is the only thing on screen the
-                    -- better it reads.
                     menu_tween(ghost, { Position = restore, Size = full_size }, Enum.EasingStyle.Quart, WIN_T)
 
-                    task.delay(WIN_T, function()
+                    task.delay(WIN_T, safe_cb(function()
                         if token ~= cfg._menu_token then return end
                         if not cfg.menu_open then return end
 
@@ -2151,60 +1987,37 @@
                         items[ "main" ].BackgroundTransparency = 0
                         ghost.Visible = false
                         if dock then dock.Visible = false end
-                    end)
+                    end))
                 else
-                    -- CLOSE: hand the window's footprint to the ghost, hide the real
-                    -- window immediately, then shrink the ghost into the dock spot.
                     cfg._restore_pos = items[ "main" ].Position
                     cfg._menu_full_size = items[ "main" ].Size
 
                     ghost.Position = items[ "main" ].Position
                     ghost.Size = items[ "main" ].Size
                     ghost.Visible = true
-                    -- Park off-screen rather than hiding, so re-opening costs a single
-                    -- Position write instead of a full re-draw of the whole tree.
                     items[ "main" ].Position = OFFSCREEN
 
-                    -- Quad ease-in: it accelerates as it collapses, so it looks like
-                    -- it is being pulled into the dock rather than gliding. It stays
-                    -- fully opaque the whole way -- fading it out mid-flight made it
-                    -- read as a translucent box floating over the dock instead of the
-                    -- window folding away.
                     menu_tween(ghost, { Position = parked, Size = pill_size }, Enum.EasingStyle.Quad, WIN_T)
 
-                    -- Build the pill hidden. The dock is NOT popped partway through
-                    -- any more: the ghost is still shrinking then, so the two
-                    -- overlapped and you could see the box sitting on top of the
-                    -- arriving pill. The ghost now disappears and the pill pops in the
-                    -- same frame, so it reads as a clean hand-off.
                     refresh_dock_icons()
                     dock.Visible = false
 
-                    task.delay(WIN_T, function()
+                    task.delay(WIN_T, safe_cb(function()
                         if token ~= cfg._menu_token then return end
                         if cfg.menu_open then return end
 
                         ghost.Visible = false
                         items[ "main" ].BackgroundTransparency = 0
-                        -- Stays off-screen while closed; OPEN moves it back.
 
-                        -- Safe Mode (library.dock_enabled == false) suppresses the
-                        -- pill entirely: the window still collapses, it just leaves
-                        -- nothing on screen behind it.
                         if dock and library.dock_enabled ~= false then
                             dock.Visible = true
                             dock.Size = dim2(0, 20, 0, 40)
                             menu_tween(dock, { Size = dock_full_size() }, Enum.EasingStyle.Back, DOCK_T)
                         end
-                    end)
+                    end))
                 end
             end
 
-            -- ── Mobile open/close button ────────────────────────────────────────
-            -- Touch-only devices have no keybind to bring the menu back, so the
-            -- library ships its own draggable floating button. It lives here rather
-            -- than in each script so every consumer of the library gets it. A small
-            -- movement threshold separates a drag from a tap.
             if uis.TouchEnabled and not uis.MouseEnabled and not uis.KeyboardEnabled then
                 local mobile_btn = library:create( "ImageButton" , {
                     Parent = library[ "items" ];
@@ -2227,7 +2040,7 @@
                 local TAP_THRESHOLD = 8
                 local press_start, start_anchor, press_moved
 
-                mobile_btn.InputBegan:Connect(function(input)
+                mobile_btn.InputBegan:Connect(safe_cb(function(input)
                     if input.UserInputType ~= Enum.UserInputType.Touch
                         and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
                         return
@@ -2239,9 +2052,9 @@
                             mobile_btn.AbsoluteSize.Y * mobile_btn.AnchorPoint.Y
                         )
                     press_moved = false
-                end)
+                end))
 
-                uis.InputChanged:Connect(function(input)
+                uis.InputChanged:Connect(safe_cb(function(input)
                     if not press_start then return end
                     if input.UserInputType ~= Enum.UserInputType.Touch
                         and input.UserInputType ~= Enum.UserInputType.MouseMovement then
@@ -2255,7 +2068,7 @@
                     if press_moved then
                         mobile_btn.Position = dim_offset(start_anchor.X + dx, start_anchor.Y + dy)
                     end
-                end)
+                end))
 
                 local function end_mobile_press(input)
                     if input.UserInputType ~= Enum.UserInputType.Touch
@@ -2270,12 +2083,12 @@
                     press_moved = false
                 end
 
-                mobile_btn.InputEnded:Connect(end_mobile_press)
-                uis.InputEnded:Connect(end_mobile_press)
+                mobile_btn.InputEnded:Connect(safe_cb(end_mobile_press))
+                uis.InputEnded:Connect(safe_cb(end_mobile_press))
             end
 
             library:begin_build()
-            task.delay(60, function() library:end_build() end)
+            task.delay(60, safe_cb(function() library:end_build() end))
 
             return setmetatable(cfg, library)
         end
@@ -2557,9 +2370,9 @@
                             library:close_element()
 						end
 
-						multi_items[ "button" ].MouseButton1Down:Connect(function()
+						multi_items[ "button" ].MouseButton1Down:Connect(safe_cb(function()
 							data.open_page()
-						end)
+						end))
 
 						cfg.pages[#cfg.pages + 1] = setmetatable(data, library)
                     end
@@ -2610,14 +2423,11 @@
                 library:close_element()
             end
 
-            items[ "button" ].MouseButton1Down:Connect(function()
+            items[ "button" ].MouseButton1Down:Connect(safe_cb(function()
                 cfg.open_tab()
-            end)
+            end))
 
             do
-                -- Register this tab so the minimise dock (velhubui-style tab-icon pill)
-                -- can list its icon and reselect it. Live references are stored so any
-                -- later icon/theme change is reflected when the dock is (re)built.
                 self._tabs = self._tabs or {}
                 self._tabs[#self._tabs + 1] = {
                     name = cfg.name,
@@ -2769,9 +2579,6 @@
                     ScrollBarImageColor3 = rgb(44, 44, 46);
                     Active = true;
                     AutomaticCanvasSize = Enum.AutomaticSize.Y;
-                    -- Scrollbar hidden. It rendered as a thin grey line down the edge
-                    -- of every section whether or not the content overflowed; wheel
-                    -- and touch scrolling still work with a zero-width bar.
                     ScrollBarThickness = 0;
                     Parent = items[ "inline" ];
                     Name = "\0";
@@ -2834,9 +2641,6 @@
                     CornerRadius = dim(0, 7)
                 });
 
-                -- Pack icons are flat white glyphs, so tinting them by the accent is
-                -- what gives them their colour. The window icon is real artwork —
-                -- multiplying it by the accent just darkens it, so leave it untinted.
                 local icon_is_artwork = (cfg.icon == library.window_icon)
 
                 items[ "Icon" ] = library:create( "ImageLabel" , {
@@ -2964,10 +2768,10 @@
             end;
 
             if cfg.fading_toggle then
-                items[ "button" ].MouseButton1Click:Connect(function()
+                items[ "button" ].MouseButton1Click:Connect(safe_cb(function()
                     cfg.default = not cfg.default
                     cfg.toggle_section(cfg.default)
-                end)
+                end))
 
                 function cfg.toggle_section(bool)
                     library:tween(items[ "toggle" ], {BackgroundColor3 = bool and themes.preset.accent or rgb(58, 58, 62)}, Enum.EasingStyle.Quad)
@@ -3221,36 +3025,26 @@
                     elements.Visible = bool
                 end
 
-                -- Set the flag BEFORE the callback runs so anything reading
-                -- Library.Flags inside it sees the new value.
                 flags[cfg.flag] = bool
 
-                -- Defer the feature work by one frame. Callbacks here can be heavy
-                -- (ESP building a marker per player, a getgc sweep, WaitForChild on
-                -- game modules) and running them inline blocked the very frame the
-                -- toggle's own tween started on -- which is the visible hitch on the
-                -- switch. The visual commits first, the work lands next frame.
-                task.defer(function()
+                task.defer(safe_cb(function()
                     cfg.callback(bool)
 
-                    -- A feature toggling on/off is what decides whether its keybind
-                    -- row shows in the list. Pushed here so the row reflects the
-                    -- state the callback actually applied.
                     if library.refresh_keybind_list then
                         library:refresh_keybind_list()
                     end
-                end)
+                end))
             end
 
-            items[ "toggle" ].MouseButton1Click:Connect(function()
+            items[ "toggle" ].MouseButton1Click:Connect(safe_cb(function()
                 cfg.enabled = not cfg.enabled
                 cfg.set(cfg.enabled)
-            end)
+            end))
 
-            items[ "toggle_button" ].MouseButton1Click:Connect(function()
+            items[ "toggle_button" ].MouseButton1Click:Connect(safe_cb(function()
                 cfg.enabled = not cfg.enabled
                 cfg.set(cfg.enabled)
-            end)
+            end))
 
             if cfg.seperator then
                 library:create( "Frame" , {
@@ -3284,11 +3078,6 @@
                 intervals = options.interval or options.decimal or 1,
                 default = options.default or 10,
                 value = options.default or 10,
-                -- Defaults off like every other element. These separator frames are
-                -- anchored to the BOTTOM of the section's element container rather
-                -- than under the row that created them, so a single slider anywhere
-                -- in a section drew a rule beneath the last element -- which is where
-                -- the stray line under dropdowns was coming from.
                 seperator = options.seperator or options.Seperator or false;
 
                 dragging = false,
@@ -3473,12 +3262,12 @@
                 end
             end
 
-            items[ "slider" ].MouseButton1Down:Connect(function()
+            items[ "slider" ].MouseButton1Down:Connect(safe_cb(function()
                 cfg.dragging = true
                 if slider_move_conn then slider_move_conn:Disconnect() end
-                slider_move_conn = uis.InputChanged:Connect(slider_on_move)
+                slider_move_conn = uis.InputChanged:Connect(safe_cb(slider_on_move))
                 library:tween(items[ "value" ], {TextColor3 = rgb(255, 255, 255)}, Enum.EasingStyle.Quad, 0.2)
-            end)
+            end))
 
             library:connection(uis.InputEnded, function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -3519,9 +3308,6 @@
                 scrolling = options.scrolling or false;
                 max_height = options.max_height or 240;
 
-                -- Wider default box: at 95 most option names ("CaptainMarvel",
-                -- "AgathaHarkness") truncated in both the closed box and the list,
-                -- since the list is sized to the box.
                 width = options.width or 130;
 
                 open = false;
@@ -3530,9 +3316,6 @@
                 ignore = options.ignore or false;
                 items = {};
                 y_size;
-                -- Defaults off. The rule under every dropdown row read as a stray
-                -- underline on the box rather than a section divider; callers that
-                -- want one can still pass seperator = true.
                 seperator = options.seperator or options.Seperator or false;
             }
 
@@ -3640,23 +3423,20 @@
                         CornerRadius = dim(0, 5)
                     });
 
-                    -- Border + hover lift. The flat filled box was hard to read as a
-                    -- control; the stroke gives it an edge and the hover brighten
-                    -- makes it obvious it is clickable.
                     items[ "dropdown_stroke" ] = library:create( "UIStroke" , {
                         Parent = items[ "dropdown" ];
                         Color = rgb(46, 46, 50);
                         ApplyStrokeMode = Enum.ApplyStrokeMode.Border
                     });
 
-                    items[ "dropdown" ].MouseEnter:Connect(function()
+                    items[ "dropdown" ].MouseEnter:Connect(safe_cb(function()
                         library:tween(items[ "dropdown" ], { BackgroundColor3 = rgb(40, 40, 43) }, Enum.EasingStyle.Quad, 0.14)
                         library:tween(items[ "dropdown_stroke" ], { Color = rgb(62, 62, 68) }, Enum.EasingStyle.Quad, 0.14)
-                    end)
-                    items[ "dropdown" ].MouseLeave:Connect(function()
+                    end))
+                    items[ "dropdown" ].MouseLeave:Connect(safe_cb(function()
                         library:tween(items[ "dropdown" ], { BackgroundColor3 = rgb(33, 33, 35) }, Enum.EasingStyle.Quad, 0.14)
                         library:tween(items[ "dropdown_stroke" ], { Color = rgb(46, 46, 50) }, Enum.EasingStyle.Quad, 0.14)
-                    end)
+                    end))
 
                     items[ "sub_text" ] = library:create( "TextLabel" , {
                         FontFace = fonts.small;
@@ -3700,8 +3480,6 @@
                         BorderColor3 = rgb(0, 0, 0);
                         Parent = library[ "items" ];
                         Name = "\0";
-                        -- Hidden until first opened; a zero-height holder still draws
-                        -- its border stroke as a stray line otherwise.
                         Visible = false;
                         BackgroundTransparency = 1;
                         Size = dim2(0, 0, 0, 0);
@@ -3728,9 +3506,6 @@
                         Parent = items[ "outline" ]
                     });
 
-                    -- Search is built for every dropdown now, not just scrolling ones:
-                    -- it appears with the list on open and is the fastest way through
-                    -- a long option set.
                     do
                         items[ "search_box" ] = library:create( "TextBox" , {
                             FontFace = fonts.small;
@@ -3769,9 +3544,6 @@
                         AutomaticCanvasSize = Enum.AutomaticSize.Y;
                         ScrollBarThickness = 0;
                         ScrollBarImageColor3 = rgb(90, 90, 92);
-                        -- Always scrollable: the list is height-capped now, so any
-                        -- option set that overflows the cap has to be reachable by
-                        -- wheel/drag regardless of how the dropdown was declared.
                         ScrollingEnabled = true;
                         ClipsDescendants = true;
                         ZIndex = 10;
@@ -3788,8 +3560,6 @@
                         CornerRadius = dim(0, 5)
                     });
 
-                    -- Matches the box's border so the open list looks like the same
-                    -- control extended downward.
                     library:create( "UIStroke" , {
                         Parent = items[ "outline" ];
                         Color = rgb(46, 46, 50);
@@ -3840,14 +3610,14 @@
                     return flags[cfg.flag] == button.Text
                 end
 
-                button.MouseEnter:Connect(function()
+                button.MouseEnter:Connect(safe_cb(function()
                     library:tween(button, { BackgroundTransparency = 0 }, Enum.EasingStyle.Quad, 0.12)
                     library:tween(button, { TextColor3 = rgb(18, 18, 22) }, Enum.EasingStyle.Quad, 0.12)
-                end)
-                button.MouseLeave:Connect(function()
+                end))
+                button.MouseLeave:Connect(safe_cb(function()
                     library:tween(button, { BackgroundTransparency = 1 }, Enum.EasingStyle.Quad, 0.12)
                     library:tween(button, { TextColor3 = isSelected() and themes.preset.accent or rgb(72, 72, 73) }, Enum.EasingStyle.Quad, 0.12)
-                end)
+                end))
 
                 return button
             end
@@ -3872,14 +3642,10 @@
             cfg.apply_search_filter = applySearchFilter
 
             if items[ "search_box" ] then
-                items[ "search_box" ]:GetPropertyChangedSignal("Text"):Connect(applySearchFilter)
+                items[ "search_box" ]:GetPropertyChangedSignal("Text"):Connect(safe_cb(applySearchFilter))
             end
 
             function cfg.set_visible(bool)
-                -- The cap applies to every dropdown, not just ones declared with
-                -- scrolling = true. Without it a long option set (every character in
-                -- the game) opened a list taller than the window and covered the page;
-                -- past the cap the list just scrolls.
                 local target = cfg.y_size
                 local cap = cfg.max_height or 240
                 if target > cap then
@@ -3890,12 +3656,6 @@
 
                 local last_px, last_py
                 local function reposition()
-                    -- The list is exactly as wide as the box and left-aligned with it,
-                    -- so it reads as the box unrolling rather than a separate popup
-                    -- that happens to appear nearby. The vertical offset is the old
-                    -- constant re-expressed relative to the box height, so it still
-                    -- lands in the same place for the default 16px box but stays
-                    -- attached if the box is ever made taller.
                     local box = items[ "dropdown" ]
                     local popWidth = box.AbsoluteSize.X
                     local px = box.AbsolutePosition.X
@@ -3910,32 +3670,22 @@
 
                 if cfg._follow then cfg._follow:Disconnect(); cfg._follow = nil end
 
-                -- A closed dropdown collapses the holder to zero height, but the
-                -- panel's border stroke still draws on that zero-height frame -- which
-                -- is the thin line left sitting under the box after closing. Hiding
-                -- the holder outright is the only thing that removes it, so it is
-                -- shown on open and hidden once the collapse finishes.
                 cfg._vis_token = (cfg._vis_token or 0) + 1
                 local vis_token = cfg._vis_token
                 if bool then
                     items[ "dropdown_holder" ].Visible = true
                 else
-                    task.delay(0.18, function()
+                    task.delay(0.18, safe_cb(function()
                         if vis_token ~= cfg._vis_token then return end
                         if cfg.open then return end
                         items[ "dropdown_holder" ].Visible = false
-                    end)
+                    end))
                 end
 
                 local popWidth = reposition()
-                -- Quint out on the way open and a slightly quicker one closing: the
-                -- height tween is what reads as the roll-down, so it carries the
-                -- animation and the scale/fade below only soften its start.
                 library:tween(items[ "dropdown_holder" ], { Size = dim_offset(popWidth, a) },
                     Enum.EasingStyle.Quint, bool and 0.28 or 0.18)
 
-                -- Arrows pick up the accent while the list is down, so an open
-                -- dropdown is obvious even when the list is off to the side.
                 if items[ "indicator" ] then
                     library:tween(items[ "indicator" ],
                         { ImageColor3 = bool and themes.preset.accent or rgb(86, 86, 87) },
@@ -3943,20 +3693,14 @@
                 end
 
                 if bool then
-                    cfg._follow = run.RenderStepped:Connect(reposition)
+                    cfg._follow = run.RenderStepped:Connect(safe_cb(reposition))
                     if items[ "scale" ] then
-                        -- 0.96 rather than 0.9: at full box width a heavy scale-up
-                        -- makes the edges visibly slide inward, which fought the
-                        -- roll-down. This just takes the hard edge off the first frame.
                         items[ "scale" ].Scale = 0.96
                         library:tween(items[ "scale" ], { Scale = 1 }, Enum.EasingStyle.Quart, 0.26)
                     end
-                    -- Fade the panel in over the first third of the roll-down so the
-                    -- list does not pop into existence at full opacity on frame one.
                     items[ "outline" ].BackgroundTransparency = 1
                     library:tween(items[ "outline" ], { BackgroundTransparency = 0 }, Enum.EasingStyle.Quad, 0.12)
                 elseif items[ "search_box" ] then
-                    -- Reset the filter on close so the next open shows every option.
                     items[ "search_box" ]:ReleaseFocus()
                     items[ "search_box" ].Text = ""
                 end
@@ -4000,7 +3744,7 @@
                     cfg.y_size += button.AbsoluteSize.Y + 6
                     insert(cfg.option_instances, button)
 
-                    button.MouseButton1Down:Connect(function()
+                    button.MouseButton1Down:Connect(safe_cb(function()
                         if cfg.multi then
                             local selected_index = find(cfg.multi_items, button.Text)
 
@@ -4017,17 +3761,17 @@
 
                             cfg.set(button.Text)
                         end
-                    end)
+                    end))
                 end
 
                 applySearchFilter()
             end
 
-            items[ "dropdown" ].MouseButton1Click:Connect(function()
+            items[ "dropdown" ].MouseButton1Click:Connect(safe_cb(function()
                 cfg.open = not cfg.open
 
                 cfg.set_visible(cfg.open)
-            end)
+            end))
 
             if cfg.seperator then
                 library:create( "Frame" , {
@@ -4501,7 +4245,6 @@
                         CornerRadius = dim(0, 4)
                     });
 
-                    -- Drives the velhubui-style pop-in when the picker opens.
                     items[ "cp_scale" ] = library:create( "UIScale" , {
                         Parent = items[ "colorpicker_holder" ];
                         Scale = 1;
@@ -4515,8 +4258,6 @@
                 items[ "colorpicker_holder" ].Position = dim_offset(items[ "colorpicker" ].AbsolutePosition.X, items[ "colorpicker" ].AbsolutePosition.Y + items[ "colorpicker" ].AbsoluteSize.Y + 45)
 
                 if bool then
-                    -- velhubui-style pop-in: scale up from small with a soft Back
-                    -- overshoot while the fade clears and the panel rises into place.
                     items[ "cp_scale" ].Scale = 0.55
                     library:tween(items[ "cp_scale" ], {Scale = 1}, Enum.EasingStyle.Back, 0.34)
                 end
@@ -4571,12 +4312,6 @@
             end
 
             function cfg.update_color()
-                -- The colour-picker elements live on IgnoreGuiInset=true ScreenGuis,
-                -- so their AbsolutePosition is already in full-viewport coordinates.
-                -- GetMouseLocation() reports the cursor in that SAME space, so we read
-                -- it directly with no GuiInset correction. The old code subtracted the
-                -- 36px inset AND sometimes fed in input.Position (a different coordinate
-                -- space), which is what made the picked colour land off from the cursor.
                 local mouse = uis:GetMouseLocation()
                 local offset = vec2(mouse.X, mouse.Y)
 
@@ -4592,22 +4327,22 @@
                 cfg.set()
             end
 
-            items[ "colorpicker" ].MouseButton1Click:Connect(function()
+            items[ "colorpicker" ].MouseButton1Click:Connect(safe_cb(function()
                 cfg.open = not cfg.open
 
                 cfg.set_visible(cfg.open)
-            end)
+            end))
 
             local cp_move_conn
             local function cp_start_drag()
                 if cp_move_conn then return end
-                cp_move_conn = uis.InputChanged:Connect(function(input)
+                cp_move_conn = uis.InputChanged:Connect(safe_cb(function(input)
                     if (dragging_sat or dragging_hue or dragging_alpha)
                         and (input.UserInputType == Enum.UserInputType.MouseMovement
                             or input.UserInputType == Enum.UserInputType.Touch) then
                         cfg.update_color()
                     end
-                end)
+                end))
             end
             local function cp_stop_drag()
                 if cp_move_conn then cp_move_conn:Disconnect(); cp_move_conn = nil end
@@ -4616,10 +4351,6 @@
             library:connection(uis.InputEnded, function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1
                     or input.UserInputType == Enum.UserInputType.Touch then
-                    -- Was the release the end of an actual pick (sat square, hue or
-                    -- alpha bar)? Only then does it dismiss the panel -- the release
-                    -- that follows the click which OPENED the picker leaves all three
-                    -- flags false, so the panel does not close on the frame it appears.
                     local was_picking = dragging_sat or dragging_hue or dragging_alpha
 
                     dragging_sat = false
@@ -4627,8 +4358,6 @@
                     dragging_alpha = false
                     cp_stop_drag()
 
-                    -- Let go of the colour and the picker goes away. Same path for
-                    -- touch, so lifting a finger on mobile closes it too.
                     if was_picking and cfg.open then
                         cfg.open = false
                         cfg.set_visible(false)
@@ -4636,40 +4365,40 @@
                 end
             end)
 
-            items[ "alpha_gradient" ].MouseButton1Down:Connect(function()
+            items[ "alpha_gradient" ].MouseButton1Down:Connect(safe_cb(function()
                 dragging_alpha = true
                 cfg.update_color()
                 cp_start_drag()
-            end)
+            end))
 
-            items[ "hue_gradient" ].MouseButton1Down:Connect(function()
+            items[ "hue_gradient" ].MouseButton1Down:Connect(safe_cb(function()
                 dragging_hue = true
                 cfg.update_color()
                 cp_start_drag()
-            end)
+            end))
 
-            items[ "sat" ].MouseButton1Down:Connect(function()
+            items[ "sat" ].MouseButton1Down:Connect(safe_cb(function()
                 dragging_sat = true
                 cfg.update_color()
                 cp_start_drag()
-            end)
+            end))
 
-            items[ "input" ].FocusLost:Connect(function()
+            items[ "input" ].FocusLost:Connect(safe_cb(function()
                 local text = items[ "input" ].Text
                 local r, g, b, a = library:convert(text)
 
                 if r and g and b and a then
                     cfg.set(rgb(r, g, b), 1 - a)
                 end
-            end)
+            end))
 
-            items[ "input" ].Focused:Connect(function()
+            items[ "input" ].Focused:Connect(safe_cb(function()
                 library:tween(items[ "input" ], {TextColor3 = rgb(245, 245, 245)})
-            end)
+            end))
 
-            items[ "input" ].FocusLost:Connect(function()
+            items[ "input" ].FocusLost:Connect(safe_cb(function()
                 library:tween(items[ "input" ], {TextColor3 = rgb(72, 72, 72)})
-            end)
+            end))
 
             cfg.set(cfg.color, cfg.alpha)
             config_flags[cfg.flag] = cfg.set
@@ -4692,11 +4421,6 @@
 
             local items = cfg.items; do
                 items[ "textbox" ] = library:create( "TextButton" , {
-                    -- LayoutOrder used to be -1, which yanked every textbox to the
-                    -- top of its section no matter where it was declared. Left at the
-                    -- default so textboxes sit in declaration order like everything
-                    -- else (the layout is SortOrder.LayoutOrder, so equal orders keep
-                    -- insertion order).
                     FontFace = fonts.font;
                     TextColor3 = rgb(0, 0, 0);
                     BorderColor3 = rgb(0, 0, 0);
@@ -4804,25 +4528,25 @@
                 cfg.callback(text)
             end
 
-            items[ "input" ]:GetPropertyChangedSignal("Text"):Connect(function()
+            items[ "input" ]:GetPropertyChangedSignal("Text"):Connect(safe_cb(function()
                 cfg.set(items[ "input" ].Text)
-            end)
+            end))
 
-            items[ "input" ].Focused:Connect(function()
+            items[ "input" ].Focused:Connect(safe_cb(function()
                 library:tween(items[ "input" ], {TextColor3 = rgb(245, 245, 245), BackgroundColor3 = rgb(33, 33, 37)}, Enum.EasingStyle.Quad, 0.18)
 
-                task.defer(function()
+                task.defer(safe_cb(function()
                     local inp = items[ "input" ]
                     if inp then
                         inp.CursorPosition = #inp.Text + 1
                         inp.SelectionStart = -1
                     end
-                end)
-            end)
+                end))
+            end))
 
-            items[ "input" ].FocusLost:Connect(function()
+            items[ "input" ].FocusLost:Connect(safe_cb(function()
                 library:tween(items[ "input" ], {TextColor3 = rgb(72, 72, 72), BackgroundColor3 = rgb(28, 28, 31)}, Enum.EasingStyle.Quad, 0.18)
-            end)
+            end))
 
             if cfg.default then
                 cfg.set(cfg.default)
@@ -4845,7 +4569,7 @@
             if not screen then
                 restore_capability()
                 screen = library:create( "ScreenGui" , {
-                    Parent = (library[ "items" ] and library[ "items" ].Parent) or gui_parent;
+                    Parent = gui_parent;
                     Name = random_gui_name();
                     Enabled = true;
                     ResetOnSpawn = false;
@@ -4914,8 +4638,6 @@
                 ZIndex = 62;
             })
 
-            -- Same as the presence bar: the header icon is the window artwork, so no
-            -- accent gradient — it would multiply into the art and darken it.
             library.keybind_title_gradient = library:create( "UIGradient" , {
                 Parent = header_title;
                 Rotation = 0;
@@ -4989,7 +4711,7 @@
             if not screen then
                 restore_capability()
                 screen = library:create( "ScreenGui" , {
-                    Parent = (library[ "items" ] and library[ "items" ].Parent) or gui_parent;
+                    Parent = gui_parent;
                     Name = random_gui_name();
                     Enabled = true;
                     ResetOnSpawn = false;
@@ -5069,8 +4791,6 @@
                 ZIndex = 62;
             })
 
-            -- No gradient on the presence icon: it is the window artwork, and an
-            -- accent gradient multiplies straight into it and darkens the art.
             library.presence_title_gradient = library:create( "UIGradient" , {
                 Parent = title_label;
                 Rotation = 0;
@@ -5155,8 +4875,6 @@
             library.keybind_loop_started = false
         end
 
-        -- Update one row. Every write is change-detected, so a refresh that changes
-        -- nothing performs zero property writes and allocates nothing.
         function library:refresh_keybind_entry(e)
             if not e or not e.row then return false end
 
@@ -5201,9 +4919,6 @@
             return visibility_changed
         end
 
-        -- Set of KeyCodes that actually have a bind, so input for anything else
-        -- (WASD, jump, chat) is rejected with one hash lookup instead of a sweep.
-        -- Invalidated rather than rebuilt on change; rebuilt lazily on next input.
         function library:invalidate_keybind_keys()
             library.keybind_key_set = nil
         end
@@ -5226,8 +4941,6 @@
             return set
         end
 
-        -- Full sweep. Called on discrete events only (key up/down, a bind changing,
-        -- a row being added/removed, the panel being toggled) -- never per frame.
         function library:refresh_keybind_list()
             local entries = library.keybind_entries
             if not entries then return end
@@ -5252,11 +4965,6 @@
         end
 
         function library:start_keybind_loop()
-            -- Not a loop any more. The old implementation polled every registered
-            -- keybind on RenderStepped at 10Hz forever, calling get_enabled/get_key/
-            -- IsKeyDown per entry whether or not anything had changed. The panel only
-            -- ever changes in response to a discrete event, so it is now driven by
-            -- input events instead: zero cost while idle.
             if library.keybind_loop_started then return end
             if library.keybind_panel_enabled == false then return end
             local entries = library.keybind_entries
@@ -5264,8 +4972,6 @@
             library.keybind_loop_started = true
 
             local function on_input(input)
-                -- Ignore everything that cannot change a row: mouse movement fires
-                -- constantly and no keybind can be bound to it.
                 local t = input.UserInputType
                 if t == Enum.UserInputType.MouseMovement
                     or t == Enum.UserInputType.MouseWheel
@@ -5273,9 +4979,6 @@
                     return
                 end
 
-                -- Only bound keys can change a row. Walking (WASD), jumping and
-                -- typing all land here; one hash lookup rejects them before any
-                -- get_enabled/get_key/IsKeyDown work happens.
                 local keys = library:keybind_keys()
                 local code = input.KeyCode
                 if not (keys[code] or keys[t]) then
@@ -5285,10 +4988,9 @@
                 library:refresh_keybind_list()
             end
 
-            library.keybind_input_began = uis.InputBegan:Connect(on_input)
-            library.keybind_input_ended = uis.InputEnded:Connect(on_input)
+            library.keybind_input_began = uis.InputBegan:Connect(safe_cb(on_input))
+            library.keybind_input_ended = uis.InputEnded:Connect(safe_cb(on_input))
 
-            -- Paint the initial state once.
             library:refresh_keybind_list()
         end
 
@@ -5363,8 +5065,6 @@
             library:invalidate_keybind_keys()
 
             library:start_keybind_loop()
-            -- start_keybind_loop no-ops once already started, so paint this row's
-            -- initial state directly instead of waiting for the next input event.
             if library:refresh_keybind_entry(entry) then
                 library:refresh_keybind_panel()
             end
@@ -5567,13 +5267,13 @@
                             PaddingLeft = dim(0, 5)
                         });
 
-                        name.MouseButton1Click:Connect(function()
+                        name.MouseButton1Click:Connect(safe_cb(function()
                             cfg.set(option)
 
                             cfg.set_visible(false)
 
                             cfg.open = false
-                        end)
+                        end))
                     end
 
             end
@@ -5721,9 +5421,6 @@
                     active = cfg.active
                 }
 
-                -- Key, mode or active state changed -- repaint the list now rather
-                -- than waiting for a polling tick to spot it. The bound key may have
-                -- changed, so the fast-reject set has to be rebuilt.
                 if library.invalidate_keybind_keys then
                     library:invalidate_keybind_keys()
                 end
@@ -5739,7 +5436,7 @@
                 items[ "dropdown" ].Position = dim_offset(items[ "keybind_holder" ].AbsolutePosition.X, items[ "keybind_holder" ].AbsolutePosition.Y + items[ "keybind_holder" ].AbsoluteSize.Y + 60)
             end
 
-            items[ "keybind_holder" ].MouseButton1Down:Connect(function()
+            items[ "keybind_holder" ].MouseButton1Down:Connect(safe_cb(function()
                 task.wait()
                 items[ "key" ].Text = "..."
 
@@ -5749,13 +5446,13 @@
                     cfg.binding:Disconnect()
                     cfg.binding = nil
                 end)
-            end)
+            end))
 
-            items[ "keybind_holder" ].MouseButton2Down:Connect(function()
+            items[ "keybind_holder" ].MouseButton2Down:Connect(safe_cb(function()
                 cfg.open = not cfg.open
 
                 cfg.set_visible(cfg.open)
-            end)
+            end))
 
             library:connection(uis.InputBegan, function(input, game_event)
                 if not game_event then
@@ -5870,31 +5567,31 @@
 
             local hovering = false
 
-            items[ "button" ].MouseEnter:Connect(function()
+            items[ "button" ].MouseEnter:Connect(safe_cb(function()
                 if library.current_open then return end
                 hovering = true
                 library:tween(items[ "button" ], { BackgroundColor3 = hover_color }, SMOOTH, 0.16)
                 library:tween(items[ "name" ],   { TextColor3 = hover_text },        SMOOTH, 0.16)
-            end)
-            items[ "button" ].MouseLeave:Connect(function()
+            end))
+            items[ "button" ].MouseLeave:Connect(safe_cb(function()
                 hovering = false
                 library:tween(items[ "button" ], { BackgroundColor3 = base_color }, SMOOTH, 0.2)
                 library:tween(items[ "name" ],   { TextColor3 = base_text },        SMOOTH, 0.2)
-            end)
+            end))
 
-            items[ "button" ].MouseButton1Down:Connect(function()
+            items[ "button" ].MouseButton1Down:Connect(safe_cb(function()
                 library:tween(items[ "scale" ],  { Scale = 0.98 },                  Enum.EasingStyle.Quad, 0.07)
                 library:tween(items[ "button" ], { BackgroundColor3 = press_color }, Enum.EasingStyle.Quad, 0.07)
-            end)
+            end))
 
-            items[ "button" ].MouseButton1Up:Connect(function()
+            items[ "button" ].MouseButton1Up:Connect(safe_cb(function()
                 library:tween(items[ "scale" ],  { Scale = 1 }, Enum.EasingStyle.Quad, 0.16)
                 library:tween(items[ "button" ], { BackgroundColor3 = hovering and hover_color or base_color }, SMOOTH, 0.18)
-            end)
+            end))
 
-            items[ "button" ].MouseButton1Click:Connect(function()
+            items[ "button" ].MouseButton1Click:Connect(safe_cb(function()
                 cfg.callback()
-            end)
+            end))
 
             return setmetatable(cfg, library)
         end
@@ -5985,11 +5682,11 @@
                 library:close_element(cfg)
             end
 
-            items[ "tick" ].MouseButton1Click:Connect(function()
+            items[ "tick" ].MouseButton1Click:Connect(safe_cb(function()
                 cfg.open = not cfg.open
 
                 cfg.set_visible(cfg.open)
-            end)
+            end))
 
             return setmetatable(cfg, library)
         end
@@ -6071,7 +5768,7 @@
                         CornerRadius = dim(0, 3)
                     });
 
-                    button.MouseButton1Click:Connect(function()
+                    button.MouseButton1Click:Connect(safe_cb(function()
                         local current = cfg.current_element
                         if current and current ~= name then
                             library:tween(current, {TextColor3 = rgb(72, 72, 72)})
@@ -6081,23 +5778,23 @@
                         cfg.callback(option_data)
                         library:tween(name, {TextColor3 = rgb(245, 245, 245)})
                         cfg.current_element = name
-                    end)
+                    end))
 
-                    name.MouseEnter:Connect(function()
+                    name.MouseEnter:Connect(safe_cb(function()
                         if cfg.current_element == name then
                             return
                         end
 
                         library:tween(name, {TextColor3 = rgb(140, 140, 140)})
-                    end)
+                    end))
 
-                    name.MouseLeave:Connect(function()
+                    name.MouseLeave:Connect(safe_cb(function()
                         if cfg.current_element == name then
                             return
                         end
 
                         library:tween(name, {TextColor3 = rgb(72, 72, 72)})
-                    end)
+                    end))
                 end
             end
 
@@ -6159,10 +5856,6 @@
             end
         end
 
-        -- Hard cap on how many notifications can exist at once. Each one is ~15
-        -- instances, and every add/expire re-tweens the Position of the whole stack,
-        -- so an unbounded stack turns a rapid burst of toggles into a real frame
-        -- cost. Oldest is retired immediately when the cap is hit.
         notifications.MAX_VISIBLE = 4
 
         function notifications:trim_notifs()
@@ -6202,7 +5895,6 @@
                     BackgroundTransparency = 1;
                     AnchorPoint = vec2(0, 0);
                     AutomaticSize = Enum.AutomaticSize.Y;
-                    -- Matches the presence bar's fill.
                     BackgroundColor3 = rgb(26, 26, 31)
                 });
 
@@ -6297,17 +5989,8 @@
                     CornerRadius = dim(0, 999)
                 });
 
-                -- Notification gradients removed: all three were flat white (identical
-                -- start/end keypoints) so they rendered as nothing, while still
-                -- costing three UIGradient instances per notification plus, on the
-                -- non-animate_title path, a RenderStepped driver that rebuilt a
-                -- 9-key ColorSequence for every one on screen.
             end
 
-            -- Monotonic id, never `#notifs + 1`: entries are cleared out of order as
-            -- notifications expire, so `#` on the holed array returns a stale index
-            -- and a new notification would overwrite a live entry's slot (whose
-            -- expiry handler then clears the wrong one, orphaning it in the list).
             notifications._next_id = (notifications._next_id or 0) + 1
             local index = notifications._next_id
             notifications.notifs[index] = items[ "notification" ]
@@ -6324,7 +6007,7 @@
 
             library:tween(items[ "bar" ], {Size = dim2(0, 0, 0, 5)}, Enum.EasingStyle.Linear, cfg.lifetime)
 
-            task.spawn(function()
+            task.spawn(safe_cb(function()
                 task.wait(cfg.lifetime)
 
                 notifications.notifs[index] = nil
@@ -6339,7 +6022,7 @@
                 task.wait(0.35)
 
                 items[ "notification" ]:Destroy()
-            end)
+            end))
         end
 
 do
