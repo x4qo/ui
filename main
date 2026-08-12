@@ -3284,7 +3284,12 @@
                 intervals = options.interval or options.decimal or 1,
                 default = options.default or 10,
                 value = options.default or 10,
-                seperator = options.seperator or options.Seperator or true;
+                -- Defaults off like every other element. These separator frames are
+                -- anchored to the BOTTOM of the section's element container rather
+                -- than under the row that created them, so a single slider anywhere
+                -- in a section drew a rule beneath the last element -- which is where
+                -- the stray line under dropdowns was coming from.
+                seperator = options.seperator or options.Seperator or false;
 
                 dragging = false,
                 items = {}
@@ -3677,59 +3682,18 @@
                         PaddingLeft = dim(0, 5)
                     });
 
-                    -- Double arrow (up + down chevron) rather than the single caret,
-                    -- so the control reads as a picker at a glance. Built from two
-                    -- copies of the same chevron -- one flipped -- instead of a new
-                    -- asset, so there is nothing extra to load.
-                    items[ "indicator" ] = library:create( "Frame" , {
+                    items[ "indicator" ] = library:create( "ImageLabel" , {
+                        ImageColor3 = rgb(86, 86, 87);
+                        BorderColor3 = rgb(0, 0, 0);
                         Parent = items[ "dropdown" ];
-                        Name = "\0";
                         AnchorPoint = vec2(1, 0.5);
+                        Image = "rbxassetid://101025591575185";
+                        BackgroundTransparency = 1;
                         Position = dim2(1, -5, 0.5, 0);
-                        Size = dim2(0, 12, 0, 16);
-                        BackgroundTransparency = 1;
-                        BorderSizePixel = 0;
-                    });
-
-                    items[ "indicator_up" ] = library:create( "ImageLabel" , {
-                        Parent = items[ "indicator" ];
                         Name = "\0";
-                        AnchorPoint = vec2(0.5, 0);
-                        Position = dim2(0.5, 0, 0, 0);
-                        Size = dim2(0, 12, 0, 7);
-                        BackgroundTransparency = 1;
+                        Size = dim2(0, 12, 0, 12);
                         BorderSizePixel = 0;
-                        Rotation = 180;
-                        ScaleType = Enum.ScaleType.Fit;
-                        Image = "rbxassetid://101025591575185";
-                        ImageColor3 = rgb(86, 86, 87);
-                    });
-
-                    items[ "indicator_down" ] = library:create( "ImageLabel" , {
-                        Parent = items[ "indicator" ];
-                        Name = "\0";
-                        AnchorPoint = vec2(0.5, 1);
-                        Position = dim2(0.5, 0, 1, 0);
-                        Size = dim2(0, 12, 0, 7);
-                        BackgroundTransparency = 1;
-                        BorderSizePixel = 0;
-                        ScaleType = Enum.ScaleType.Fit;
-                        Image = "rbxassetid://101025591575185";
-                        ImageColor3 = rgb(86, 86, 87);
-                    });
-
-                    -- The divider bar between the two arrows. Drawn rather than
-                    -- sourced as an asset: it is a 1px rule, and this way the whole
-                    -- glyph recolours with the arrows instead of needing a matching
-                    -- upload.
-                    items[ "indicator_bar" ] = library:create( "Frame" , {
-                        Parent = items[ "indicator" ];
-                        Name = "\0";
-                        AnchorPoint = vec2(0.5, 0.5);
-                        Position = dim2(0.5, 0, 0.5, 0);
-                        Size = dim2(0, 9, 0, 1);
-                        BorderSizePixel = 0;
-                        BackgroundColor3 = rgb(86, 86, 87);
+                        BackgroundColor3 = rgb(255, 255, 255)
                     });
 
                     items[ "dropdown_holder" ] = library:create( "Frame" , {
@@ -3803,7 +3767,10 @@
                         AutomaticCanvasSize = Enum.AutomaticSize.Y;
                         ScrollBarThickness = 0;
                         ScrollBarImageColor3 = rgb(90, 90, 92);
-                        ScrollingEnabled = cfg.scrolling;
+                        -- Always scrollable: the list is height-capped now, so any
+                        -- option set that overflows the cap has to be reachable by
+                        -- wheel/drag regardless of how the dropdown was declared.
+                        ScrollingEnabled = true;
                         ClipsDescendants = true;
                         ZIndex = 10;
                     });
@@ -3907,9 +3874,14 @@
             end
 
             function cfg.set_visible(bool)
+                -- The cap applies to every dropdown, not just ones declared with
+                -- scrolling = true. Without it a long option set (every character in
+                -- the game) opened a list taller than the window and covered the page;
+                -- past the cap the list just scrolls.
                 local target = cfg.y_size
-                if cfg.scrolling and cfg.max_height and target > cfg.max_height then
-                    target = cfg.max_height
+                local cap = cfg.max_height or 240
+                if target > cap then
+                    target = cap
                 end
                 target += SEARCH_BOX_HEIGHT
                 local a = bool and target or 0
@@ -3945,10 +3917,10 @@
 
                 -- Arrows pick up the accent while the list is down, so an open
                 -- dropdown is obvious even when the list is off to the side.
-                local arrow_colour = bool and themes.preset.accent or rgb(86, 86, 87)
-                if items[ "indicator_up" ] then
-                    library:tween(items[ "indicator_up" ], { ImageColor3 = arrow_colour }, Enum.EasingStyle.Quad, 0.18)
-                    library:tween(items[ "indicator_down" ], { ImageColor3 = arrow_colour }, Enum.EasingStyle.Quad, 0.18)
+                if items[ "indicator" ] then
+                    library:tween(items[ "indicator" ],
+                        { ImageColor3 = bool and themes.preset.accent or rgb(86, 86, 87) },
+                        Enum.EasingStyle.Quad, 0.18)
                 end
 
                 if bool then
@@ -4625,10 +4597,23 @@
             library:connection(uis.InputEnded, function(input)
                 if input.UserInputType == Enum.UserInputType.MouseButton1
                     or input.UserInputType == Enum.UserInputType.Touch then
+                    -- Was the release the end of an actual pick (sat square, hue or
+                    -- alpha bar)? Only then does it dismiss the panel -- the release
+                    -- that follows the click which OPENED the picker leaves all three
+                    -- flags false, so the panel does not close on the frame it appears.
+                    local was_picking = dragging_sat or dragging_hue or dragging_alpha
+
                     dragging_sat = false
                     dragging_hue = false
                     dragging_alpha = false
                     cp_stop_drag()
+
+                    -- Let go of the colour and the picker goes away. Same path for
+                    -- touch, so lifting a finger on mobile closes it too.
+                    if was_picking and cfg.open then
+                        cfg.open = false
+                        cfg.set_visible(false)
+                    end
                 end
             end)
 
