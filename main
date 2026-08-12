@@ -1574,10 +1574,9 @@
                     BackgroundColor3 = rgb(21, 21, 23)
                 });
 
-                -- Top-right control. This used to be a decorative "move" glyph; it is
-                -- now the minimise button (the window is draggable from anywhere on
-                -- the title bar anyway, so the glyph carried no function). The dash is
-                -- a plain Frame rather than an asset so it can never fail to load.
+                -- Top-right control. Same glyph as before, but it is now clickable and
+                -- minimises the window (it used to be purely decorative; the window is
+                -- draggable from anywhere on the title bar anyway).
                 items[ "move_icon" ] = library:create( "ImageButton" , {
                     Parent = items[ "multi_holder" ];
                     Name = "\0";
@@ -1587,21 +1586,10 @@
                     BackgroundTransparency = 1;
                     AutoButtonColor = false;
                     BorderSizePixel = 0;
-                    Image = "";
+                    Image = "rbxassetid://116138709011735";
                     ImageColor3 = themes.preset.accent
                 }); library:apply_theme(items[ "move_icon" ], "accent", "ImageColor3");
                 items[ "minimise_button" ] = items[ "move_icon" ];
-
-                items[ "minimise_dash" ] = library:create( "Frame" , {
-                    Parent = items[ "move_icon" ];
-                    Name = "\0";
-                    AnchorPoint = vec2(0.5, 0.5);
-                    Position = dim2(0.5, 0, 0.5, 0);
-                    Size = dim2(0, 14, 0, 2);
-                    BorderSizePixel = 0;
-                    BackgroundColor3 = themes.preset.accent
-                }); library:apply_theme(items[ "minimise_dash" ], "accent", "BackgroundColor3");
-                library:create( "UICorner" , { Parent = items[ "minimise_dash" ]; CornerRadius = dim(1, 0) });
 
                 -- Routed through library:tween so flicking the cursor on and off the
                 -- icon replaces the running Size tween instead of stacking one per
