@@ -3623,8 +3623,26 @@
 
                     library:create( "UICorner" , {
                         Parent = items[ "dropdown" ];
-                        CornerRadius = dim(0, 4)
+                        CornerRadius = dim(0, 5)
                     });
+
+                    -- Border + hover lift. The flat filled box was hard to read as a
+                    -- control; the stroke gives it an edge and the hover brighten
+                    -- makes it obvious it is clickable.
+                    items[ "dropdown_stroke" ] = library:create( "UIStroke" , {
+                        Parent = items[ "dropdown" ];
+                        Color = rgb(46, 46, 50);
+                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+                    });
+
+                    items[ "dropdown" ].MouseEnter:Connect(function()
+                        library:tween(items[ "dropdown" ], { BackgroundColor3 = rgb(40, 40, 43) }, Enum.EasingStyle.Quad, 0.14)
+                        library:tween(items[ "dropdown_stroke" ], { Color = rgb(62, 62, 68) }, Enum.EasingStyle.Quad, 0.14)
+                    end)
+                    items[ "dropdown" ].MouseLeave:Connect(function()
+                        library:tween(items[ "dropdown" ], { BackgroundColor3 = rgb(33, 33, 35) }, Enum.EasingStyle.Quad, 0.14)
+                        library:tween(items[ "dropdown_stroke" ], { Color = rgb(46, 46, 50) }, Enum.EasingStyle.Quad, 0.14)
+                    end)
 
                     items[ "sub_text" ] = library:create( "TextLabel" , {
                         FontFace = fonts.small;
@@ -3650,18 +3668,45 @@
                         PaddingLeft = dim(0, 5)
                     });
 
-                    items[ "indicator" ] = library:create( "ImageLabel" , {
-                        ImageColor3 = rgb(86, 86, 87);
-                        BorderColor3 = rgb(0, 0, 0);
+                    -- Double arrow (up + down chevron) rather than the single caret,
+                    -- so the control reads as a picker at a glance. Built from two
+                    -- copies of the same chevron -- one flipped -- instead of a new
+                    -- asset, so there is nothing extra to load.
+                    items[ "indicator" ] = library:create( "Frame" , {
                         Parent = items[ "dropdown" ];
-                        AnchorPoint = vec2(1, 0.5);
-                        Image = "rbxassetid://101025591575185";
-                        BackgroundTransparency = 1;
-                        Position = dim2(1, -5, 0.5, 0);
                         Name = "\0";
-                        Size = dim2(0, 12, 0, 12);
+                        AnchorPoint = vec2(1, 0.5);
+                        Position = dim2(1, -5, 0.5, 0);
+                        Size = dim2(0, 12, 0, 16);
+                        BackgroundTransparency = 1;
                         BorderSizePixel = 0;
-                        BackgroundColor3 = rgb(255, 255, 255)
+                    });
+
+                    items[ "indicator_up" ] = library:create( "ImageLabel" , {
+                        Parent = items[ "indicator" ];
+                        Name = "\0";
+                        AnchorPoint = vec2(0.5, 0);
+                        Position = dim2(0.5, 0, 0, -1);
+                        Size = dim2(0, 12, 0, 11);
+                        BackgroundTransparency = 1;
+                        BorderSizePixel = 0;
+                        Rotation = 180;
+                        ScaleType = Enum.ScaleType.Fit;
+                        Image = "rbxassetid://101025591575185";
+                        ImageColor3 = rgb(86, 86, 87);
+                    });
+
+                    items[ "indicator_down" ] = library:create( "ImageLabel" , {
+                        Parent = items[ "indicator" ];
+                        Name = "\0";
+                        AnchorPoint = vec2(0.5, 1);
+                        Position = dim2(0.5, 0, 1, 1);
+                        Size = dim2(0, 12, 0, 11);
+                        BackgroundTransparency = 1;
+                        BorderSizePixel = 0;
+                        ScaleType = Enum.ScaleType.Fit;
+                        Image = "rbxassetid://101025591575185";
+                        ImageColor3 = rgb(86, 86, 87);
                     });
 
                     items[ "dropdown_holder" ] = library:create( "Frame" , {
@@ -3745,7 +3790,15 @@
 
                     library:create( "UICorner" , {
                         Parent = items[ "outline" ];
-                        CornerRadius = dim(0, 4)
+                        CornerRadius = dim(0, 5)
+                    });
+
+                    -- Matches the box's border so the open list looks like the same
+                    -- control extended downward.
+                    library:create( "UIStroke" , {
+                        Parent = items[ "outline" ];
+                        Color = rgb(46, 46, 50);
+                        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
                     });
 
                     items[ "scale" ] = library:create( "UIScale" , {
@@ -3837,9 +3890,16 @@
 
                 local last_px, last_py
                 local function reposition()
-                    local popWidth = math.max(items[ "dropdown" ].AbsoluteSize.X, 160)
-                    local px = items[ "dropdown" ].AbsolutePosition.X - (popWidth - items[ "dropdown" ].AbsoluteSize.X)
-                    local py = items[ "dropdown" ].AbsolutePosition.Y + 80
+                    -- The list is exactly as wide as the box and left-aligned with it,
+                    -- so it reads as the box unrolling rather than a separate popup
+                    -- that happens to appear nearby. The vertical offset is the old
+                    -- constant re-expressed relative to the box height, so it still
+                    -- lands in the same place for the default 16px box but stays
+                    -- attached if the box is ever made taller.
+                    local box = items[ "dropdown" ]
+                    local popWidth = box.AbsoluteSize.X
+                    local px = box.AbsolutePosition.X
+                    local py = box.AbsolutePosition.Y + box.AbsoluteSize.Y + 64
 
                     if px ~= last_px or py ~= last_py then
                         last_px, last_py = px, py
@@ -3851,15 +3911,33 @@
                 if cfg._follow then cfg._follow:Disconnect(); cfg._follow = nil end
 
                 local popWidth = reposition()
+                -- Quint out on the way open and a slightly quicker one closing: the
+                -- height tween is what reads as the roll-down, so it carries the
+                -- animation and the scale/fade below only soften its start.
                 library:tween(items[ "dropdown_holder" ], { Size = dim_offset(popWidth, a) },
                     Enum.EasingStyle.Quint, bool and 0.28 or 0.18)
+
+                -- Arrows pick up the accent while the list is down, so an open
+                -- dropdown is obvious even when the list is off to the side.
+                local arrow_colour = bool and themes.preset.accent or rgb(86, 86, 87)
+                if items[ "indicator_up" ] then
+                    library:tween(items[ "indicator_up" ], { ImageColor3 = arrow_colour }, Enum.EasingStyle.Quad, 0.18)
+                    library:tween(items[ "indicator_down" ], { ImageColor3 = arrow_colour }, Enum.EasingStyle.Quad, 0.18)
+                end
 
                 if bool then
                     cfg._follow = run.RenderStepped:Connect(reposition)
                     if items[ "scale" ] then
-                        items[ "scale" ].Scale = 0.9
-                        library:tween(items[ "scale" ], { Scale = 1 }, Enum.EasingStyle.Back, 0.28)
+                        -- 0.96 rather than 0.9: at full box width a heavy scale-up
+                        -- makes the edges visibly slide inward, which fought the
+                        -- roll-down. This just takes the hard edge off the first frame.
+                        items[ "scale" ].Scale = 0.96
+                        library:tween(items[ "scale" ], { Scale = 1 }, Enum.EasingStyle.Quart, 0.26)
                     end
+                    -- Fade the panel in over the first third of the roll-down so the
+                    -- list does not pop into existence at full opacity on frame one.
+                    items[ "outline" ].BackgroundTransparency = 1
+                    library:tween(items[ "outline" ], { BackgroundTransparency = 0 }, Enum.EasingStyle.Quad, 0.12)
                 end
 
                 if not (self.sanity and library.current_open == self) then
