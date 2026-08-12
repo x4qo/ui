@@ -1574,17 +1574,34 @@
                     BackgroundColor3 = rgb(21, 21, 23)
                 });
 
-                items[ "move_icon" ] = library:create( "ImageLabel" , {
+                -- Top-right control. This used to be a decorative "move" glyph; it is
+                -- now the minimise button (the window is draggable from anywhere on
+                -- the title bar anyway, so the glyph carried no function). The dash is
+                -- a plain Frame rather than an asset so it can never fail to load.
+                items[ "move_icon" ] = library:create( "ImageButton" , {
                     Parent = items[ "multi_holder" ];
                     Name = "\0";
                     AnchorPoint = vec2(1, 0.5);
                     Position = dim2(1, -14, 0.5, 0);
                     Size = dim2(0, 24, 0, 24);
                     BackgroundTransparency = 1;
+                    AutoButtonColor = false;
                     BorderSizePixel = 0;
-                    Image = "rbxassetid://116138709011735";
+                    Image = "";
                     ImageColor3 = themes.preset.accent
                 }); library:apply_theme(items[ "move_icon" ], "accent", "ImageColor3");
+                items[ "minimise_button" ] = items[ "move_icon" ];
+
+                items[ "minimise_dash" ] = library:create( "Frame" , {
+                    Parent = items[ "move_icon" ];
+                    Name = "\0";
+                    AnchorPoint = vec2(0.5, 0.5);
+                    Position = dim2(0.5, 0, 0.5, 0);
+                    Size = dim2(0, 14, 0, 2);
+                    BorderSizePixel = 0;
+                    BackgroundColor3 = themes.preset.accent
+                }); library:apply_theme(items[ "minimise_dash" ], "accent", "BackgroundColor3");
+                library:create( "UICorner" , { Parent = items[ "minimise_dash" ]; CornerRadius = dim(1, 0) });
 
                 -- Routed through library:tween so flicking the cursor on and off the
                 -- icon replaces the running Size tween instead of stacking one per
@@ -1594,6 +1611,13 @@
                 end)
                 items[ "move_icon" ].MouseLeave:Connect(function()
                     library:tween(items[ "move_icon" ], { Size = dim2(0, 24, 0, 24) }, Enum.EasingStyle.Quad, 0.2)
+                end)
+                -- cfg.toggle_menu is defined further down in library:window, so it is
+                -- resolved at click time rather than captured here.
+                items[ "move_icon" ].MouseButton1Click:Connect(function()
+                    if type(cfg.toggle_menu) == "function" then
+                        cfg.toggle_menu(false)
+                    end
                 end)
 
                 if search_enabled then
@@ -2186,6 +2210,80 @@
                         end
                     end)
                 end
+            end
+
+            -- ── Mobile open/close button ────────────────────────────────────────
+            -- Touch-only devices have no keybind to bring the menu back, so the
+            -- library ships its own draggable floating button. It lives here rather
+            -- than in each script so every consumer of the library gets it. A small
+            -- movement threshold separates a drag from a tap.
+            if uis.TouchEnabled and not uis.MouseEnabled and not uis.KeyboardEnabled then
+                local mobile_btn = library:create( "ImageButton" , {
+                    Parent = library[ "items" ];
+                    Name = "\0";
+                    AnchorPoint = vec2(0.5, 0);
+                    Position = dim2(0.5, 0, 0, 6);
+                    Size = dim2(0, 44, 0, 44);
+                    BackgroundColor3 = rgb(18, 18, 22);
+                    BackgroundTransparency = 0.15;
+                    BorderSizePixel = 0;
+                    AutoButtonColor = true;
+                    ScaleType = Enum.ScaleType.Fit;
+                    Image = cfg.icon or library.window_icon or "rbxassetid://10709790948";
+                    ZIndex = 60;
+                })
+                library:create( "UICorner" , { Parent = mobile_btn; CornerRadius = dim(0, 10) })
+                library:create( "UIStroke" , { Parent = mobile_btn; Color = rgb(60, 60, 68); ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+                library.mobile_button = mobile_btn
+
+                local TAP_THRESHOLD = 8
+                local press_start, start_anchor, press_moved
+
+                mobile_btn.InputBegan:Connect(function(input)
+                    if input.UserInputType ~= Enum.UserInputType.Touch
+                        and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                        return
+                    end
+                    press_start = input.Position
+                    start_anchor = mobile_btn.AbsolutePosition
+                        + vec2(
+                            mobile_btn.AbsoluteSize.X * mobile_btn.AnchorPoint.X,
+                            mobile_btn.AbsoluteSize.Y * mobile_btn.AnchorPoint.Y
+                        )
+                    press_moved = false
+                end)
+
+                uis.InputChanged:Connect(function(input)
+                    if not press_start then return end
+                    if input.UserInputType ~= Enum.UserInputType.Touch
+                        and input.UserInputType ~= Enum.UserInputType.MouseMovement then
+                        return
+                    end
+                    local dx = input.Position.X - press_start.X
+                    local dy = input.Position.Y - press_start.Y
+                    if not press_moved and (abs(dx) > TAP_THRESHOLD or abs(dy) > TAP_THRESHOLD) then
+                        press_moved = true
+                    end
+                    if press_moved then
+                        mobile_btn.Position = dim_offset(start_anchor.X + dx, start_anchor.Y + dy)
+                    end
+                end)
+
+                local function end_mobile_press(input)
+                    if input.UserInputType ~= Enum.UserInputType.Touch
+                        and input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+                        return
+                    end
+                    if not press_start then return end
+                    press_start = nil
+                    if not press_moved then
+                        cfg.toggle_menu(not cfg.menu_open)
+                    end
+                    press_moved = false
+                end
+
+                mobile_btn.InputEnded:Connect(end_mobile_press)
+                uis.InputEnded:Connect(end_mobile_press)
             end
 
             library:begin_build()
