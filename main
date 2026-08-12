@@ -4580,7 +4580,11 @@
 
             local items = cfg.items; do
                 items[ "textbox" ] = library:create( "TextButton" , {
-                    LayoutOrder = -1;
+                    -- LayoutOrder used to be -1, which yanked every textbox to the
+                    -- top of its section no matter where it was declared. Left at the
+                    -- default so textboxes sit in declaration order like everything
+                    -- else (the layout is SortOrder.LayoutOrder, so equal orders keep
+                    -- insertion order).
                     FontFace = fonts.font;
                     TextColor3 = rgb(0, 0, 0);
                     BorderColor3 = rgb(0, 0, 0);
